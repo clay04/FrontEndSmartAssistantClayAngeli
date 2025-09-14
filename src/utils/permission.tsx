@@ -34,6 +34,18 @@ export async function ensureAllPermissions(): Promise<boolean> {
       }
     }
 
+    if (Platform.OS === "android") {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        {
+          title: "Permission Lokasi",
+          message: "Aplikasi membutuhkan akses lokasi untuk Contextual Assistant",
+          buttonPositive: "OK",
+        }
+      );
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    }
+
     return true;
   } catch (e) {
     console.warn('Permission error', e);
