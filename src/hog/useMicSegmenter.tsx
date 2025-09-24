@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import AudioRecorderPlayer from 'react-native-audio-recorder-player';
+import AudioRecord from 'react-native-audio-record';
 
 type MicOptions = {
   segmentMs?: number;
@@ -7,38 +7,57 @@ type MicOptions = {
   onSegment?: (uri: string) => void;
 };
 
-export function useMicSegmenter({ segmentMs = 5000, enabled = false, onSegment }: MicOptions) {
-  const arpRef = useRef<AudioRecorderPlayer | null>(null);
-  const timerRef = useRef<any>(null);
+export function useMicSegmenter({
+  segmentMs = 5000,
+  enabled = false,
+  onSegment,
+}: MicOptions) {
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const [isRecording, setIsRecording] = useState(false);
 
   async function startOnce() {
-    if (!arpRef.current) arpRef.current = new AudioRecorderPlayer();
     try {
       setIsRecording(true);
-      const uri = await arpRef.current.startRecorder();
+
+      // 🔧 Konfigurasi rekaman → hasil .wav valid
+      AudioRecord.init({
+        sampleRate: 16000,   // sesuai kebutuhan STT
+        channels: 1,
+        bitsPerSample: 16,
+        wavFile: `segment_${Date.now()}.wav`,
+      });
+
+      await AudioRecord.start();
+
       timerRef.current = setTimeout(async () => {
         try {
-          const out = await arpRef.current?.stopRecorder();
+          const out = await AudioRecord.stop(); // 👉 out = path file wav
           setIsRecording(false);
-          if (onSegment && out) onSegment(out);
-          if (enabled) startOnce();
+
+          if (onSegment && out) {
+            onSegment(out);
+          }
+
+          if (enabled) startOnce(); // rekursif
         } catch (e) {
+          console.error('Stop recorder error:', e);
           setIsRecording(false);
         }
       }, segmentMs);
     } catch (e) {
+      console.error('Start recorder error:', e);
       setIsRecording(false);
     }
   }
 
   useEffect(() => {
     if (enabled) startOnce();
+
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-      if (arpRef.current) {
-        try { arpRef.current.stopRecorder(); } catch {}
-      }
+      try {
+        AudioRecord.stop();
+      } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, segmentMs]);

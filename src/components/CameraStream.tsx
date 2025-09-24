@@ -38,6 +38,8 @@ const CameraStream = forwardRef<CameraStreamHandle, Props>(({ onReady }, ref) =>
           ? photo.path
           : "file://" + photo.path;
         console.log("📸 Snapshot taken:", fixedPath);
+        console.log("📸 Snapshot details:", JSON.stringify(photo, null, 2));
+        console.log("📸 Snapshot size (bytes):", photo.size);
         return fixedPath;
       } catch (e) {
         console.warn("❌ takePhoto failed", e);
