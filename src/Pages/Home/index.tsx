@@ -10,7 +10,7 @@ import { getCurrentLocation } from '../../utils/Location';
 import RNFS from 'react-native-fs';
 import ImageResizer from 'react-native-image-resizer';
 
-const WS_ENDPOINT = 'ws://192.168.18.24:5000/voice/ws'; // WebSocket backend
+const WS_ENDPOINT = 'ws://192.168.110.198:5000/voice/ws'; // WebSocket backend
 const LOCATION_INTERVAL = 10000;
 
 // 🔧 Helper: file → base64
@@ -78,12 +78,22 @@ const Home: React.FC = () => {
           console.log("📸 Image base64 size:", imageB64.length);
         }
 
+        // Lokasi
+        let coords = null;
+        try {
+          coords = await getCurrentLocation();
+        } catch (e) {
+          console.warn('⚠️ Gagal mendapatkan lokasi:', e);
+        }
+
         setSending(true);
         setWaitingResponse(true);
         const payload = {
           type: "request",
           audio: audioB64,
           image: imageB64,
+          latitude: coords?.latitude || lastLocation?.latitude || null,
+          longitude: coords?.longitude || lastLocation?.longitude || null,
         };
 
         const jsonStr = JSON.stringify(payload);
