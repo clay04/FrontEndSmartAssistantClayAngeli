@@ -11,7 +11,6 @@ export interface Coordinates {
 export async function getCurrentLocation(): Promise<Coordinates | null> {
   return new Promise(async (resolve, reject) => {
     try {
-      // Pastikan izin lokasi sudah granted
       if (Platform.OS === 'android') {
         const granted = await PermissionsAndroid.check(
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
@@ -23,18 +22,12 @@ export async function getCurrentLocation(): Promise<Coordinates | null> {
       }
 
       Geolocation.getCurrentPosition(
-        async (position) => {
-            try{
-                const { latitude, longitude } = position.coords;
-                console.log('📍 Lokasi saat ini:', latitude, longitude);
-
-                await axios.post('http://192.168.10.131:5000/location/status', { latitude, longitude});
-                resolve({ latitude, longitude });
-            } catch (error) {
-                reject(error);
-            }
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          console.log('📍 Lokasi saat ini:', latitude, longitude);
+          resolve({ latitude, longitude });
         },
-        error => {
+        (error) => {
           console.warn('❌ Gagal mendapatkan lokasi:', error);
           reject(error);
         },
