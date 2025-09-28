@@ -4,13 +4,14 @@ import CameraStream, { CameraStreamHandle } from '../../components/CameraStream'
 import { ensureAllPermissions } from '../../utils/permission';
 import { initTTS, speak } from '../../utils/tts';
 import { useMicSegmenter } from '../../hog/useMicSegmenter';
+import { useMicUtterance } from '../../hog/useMicUtterence';
 import type { BackendResponse } from '../../types';
 import { getCurrentLocation } from '../../utils/Location';
 
 import RNFS from 'react-native-fs';
 import ImageResizer from 'react-native-image-resizer';
 
-const WS_ENDPOINT = 'ws://192.168.110.198:5000/voice/ws'; // WebSocket backend
+const WS_ENDPOINT = 'ws://192.168.18.24:5000/voice/ws'; // WebSocket backend
 const LOCATION_INTERVAL = 10000;
 
 // 🔧 Helper: file → base64
@@ -49,10 +50,9 @@ const Home: React.FC = () => {
   const [lastLocation, setLastLocation] = useState<{ latitude: number; longitude: number } | null>(null);
 
   // 🎤 Kirim audio + foto ke backend via WS
-  useMicSegmenter({
-    segmentMs: 30000,
-    enabled: micOn && permitted && camRef.current?.isReady() && !sending,
-    onSegment: async (audioUri) => {
+  useMicUtterance({
+    enabled: micOn && permitted,
+    onUtterance: async (audioUri, base64) => {
       if (!camRef.current?.isReady()) {
         console.log("⚠️ Skip snapshot: camera not ready");
         return;
@@ -65,10 +65,6 @@ const Home: React.FC = () => {
           console.warn("❌ WebSocket belum siap");
           return;
         }
-
-        // 🎤 Audio
-        const audioB64 = await fileToBase64(audioUri);
-        console.log("🎤 Audio base64 size:", audioB64.length);
 
         // 📸 Image
         let imageB64: string | null = null;
@@ -90,7 +86,7 @@ const Home: React.FC = () => {
         setWaitingResponse(true);
         const payload = {
           type: "request",
-          audio: audioB64,
+          audio: base64,
           image: imageB64,
           latitude: coords?.latitude || lastLocation?.latitude || null,
           longitude: coords?.longitude || lastLocation?.longitude || null,
@@ -159,30 +155,6 @@ const Home: React.FC = () => {
 
     return () => {
       ws.current?.close();
-    };
-  }, []);
-
-  // 📍 Lokasi tiap beberapa detik
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    const startLocationUpdates = async () => {
-      interval = setInterval(async () => {
-        try {
-          const coords = await getCurrentLocation();
-          if (coords) {
-            setLastLocation(coords);
-            console.log('Lokasi terkini:', coords);
-          }
-        } catch (error) {
-          console.warn('Gagal update lokasi:', error);
-          Alert.alert('Error', 'Gagal mendapatkan lokasi.');
-        }
-      }, LOCATION_INTERVAL);
-    };
-
-    startLocationUpdates();
-    return () => {
-      if (interval) clearInterval(interval);
     };
   }, []);
 
