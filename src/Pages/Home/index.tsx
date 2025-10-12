@@ -3,16 +3,13 @@ import { ActivityIndicator, Alert, Button, Image, StyleSheet, Text, View, Scroll
 import CameraStream, { CameraStreamHandle } from '../../components/CameraStream';
 import { ensureAllPermissions } from '../../utils/permission';
 import { initTTS, speak } from '../../utils/tts';
-import { useMicSegmenter } from '../../hog/useMicSegmenter';
 import { useMicUtterance } from '../../hog/useMicUtterence';
-import type { BackendResponse } from '../../types';
 import { getCurrentLocation } from '../../utils/Location';
 
 import RNFS from 'react-native-fs';
 import ImageResizer from 'react-native-image-resizer';
 
-const WS_ENDPOINT = 'ws://192.168.18.24:5000/voice/ws'; // WebSocket backend
-const LOCATION_INTERVAL = 10000;
+const WS_ENDPOINT = 'ws://10.189.235.131:5000/voice/ws'; // WebSocket backend
 
 // 🔧 Helper: file → base64
 async function fileToBase64(uri: string): Promise<string> {

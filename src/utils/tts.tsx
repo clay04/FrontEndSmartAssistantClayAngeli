@@ -18,7 +18,7 @@ export async function initTTS(preferredLang = 'id-ID') {
       try { await Tts.setDefaultLanguage(preferredLang); } catch {}
     }
 
-    await Tts.setDefaultRate(0.45, true);
+    await Tts.setDefaultRate(1.0, true);
     await Tts.setDefaultPitch(1.0);
   } catch (e) {
     console.warn('TTS init failed', e);
