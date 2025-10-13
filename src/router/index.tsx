@@ -6,6 +6,7 @@ import {
     LastNameSignUp, 
     PasswordSignUp, 
     Splash, 
+    UsernameLogin, 
     UsernameSignUp
  } from "../Pages";
 
@@ -42,6 +43,12 @@ const Router = () => {
             <Stack.Screen 
                 name="PasswordSignUp"
                 component={PasswordSignUp}
+                options={{ headerShown: false}}
+            />
+
+            <Stack.Screen 
+                name="UsernameLogin"
+                component={UsernameLogin}
                 options={{ headerShown: false}}
             />
 
