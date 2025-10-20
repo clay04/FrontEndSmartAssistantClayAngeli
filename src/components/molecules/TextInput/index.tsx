@@ -27,9 +27,8 @@ const TextInputComponent = ({
         value={value}
         onChangeText={onChangeText}
         secureTextEntry={secureTextEntry}
-        style={[styles.input,
-            error ? {borderColor: 'red'} : {borderColor: 'gray'}
-        ]}
+        placeholderTextColor="#9B9191"
+        style={styles.input}
       />
       {error && <Text style={{color: 'red'}}>{error}</Text>}
     </View>
@@ -49,11 +48,12 @@ const styles = StyleSheet.create({
     },
     input: {
         borderWidth: 1.2,
-        borderColor: "#ccc",
+        borderColor: "#ffffff",
         borderRadius: 8,
         padding: 12,
         fontSize: 16,
-        backgroundColor: "#fff",
+        color: "#fff",
+        backgroundColor: "#ffffff1d",
     },
     error: {
         marginTop: 4,
