@@ -3,19 +3,21 @@ import React from 'react'
 
 const index = ({
     label,
-    backgroundColor = '#7A45FF',
-    borderRadius = 8,
+    backgroundColor = backgroundColor,
+    borderRadius = borderRadius,
     textColor = '#FFFFFF',
+    width,
+    fontFamily,
     onPress
 }) => {
   return (
-    <View>
+    <View style={styles.buttonContainer(borderRadius, width)}>
         <TouchableOpacity
         style={styles.container(backgroundColor, borderRadius)}
         activeOpacity={0.7}
         onPress={onPress}
         >
-            <Text style={styles.label(textColor)}>{label}</Text>
+            <Text style={styles.label(textColor, fontFamily)}>{label}</Text>
         </TouchableOpacity>
     </View>
   )
@@ -24,18 +26,22 @@ const index = ({
 export default index
 
 const styles = StyleSheet.create({
+    buttonContainer: (borderRadisus, width) => ({
+        borderRadius: borderRadisus,
+        width: width,
+    }),
     container: (backgroundColor, borderRadius) => ({
         backgroundColor: backgroundColor,
-        paddingVertical: 2,
-        borderRadisus: borderRadius,
-        width: 68,
-        height: 25,
+        borderRadius: borderRadius,
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: 35,
     }),
 
-    label: (textColor) => ({
+    label: (textColor, fontFamily) => ({
         textAlign: 'center',
         color: textColor,
-        fontSize: 12,
-        fontFamily: 'Onest-Medium',
+        fontSize: 14,
+        fontFamily: fontFamily,
     })
 })
