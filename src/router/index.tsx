@@ -4,6 +4,7 @@ import {
     FirstNameSignUp, 
     Home, 
     LastNameSignUp, 
+    PasswordLogin, 
     PasswordSignUp, 
     Splash, 
     UsernameLogin, 
@@ -49,6 +50,12 @@ const Router = () => {
             <Stack.Screen 
                 name="UsernameLogin"
                 component={UsernameLogin}
+                options={{ headerShown: false}}
+            />
+
+            <Stack.Screen 
+                name="PasswordLogin"
+                component={PasswordLogin}
                 options={{ headerShown: false}}
             />
 

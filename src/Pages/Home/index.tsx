@@ -9,7 +9,9 @@ import { getCurrentLocation } from '../../utils/Location';
 import RNFS from 'react-native-fs';
 import ImageResizer from 'react-native-image-resizer';
 
-const WS_ENDPOINT = 'ws://10.189.235.131:5000/voice/ws'; // WebSocket backend
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const WS_ENDPOINT = 'ws://192.168.110.196:5000/voice/ws'; // WebSocket backend
 
 // 🔧 Helper: file → base64
 async function fileToBase64(uri: string): Promise<string> {
@@ -44,7 +46,7 @@ const Home: React.FC = () => {
   const [lastPhoto, setLastPhoto] = useState<string | null>(null);
   const [lastText, setLastText] = useState<string>('');
   const [micOn, setMicOn] = useState<boolean>(true);
-  const [lastLocation, setLastLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [lastLocation, ] = useState<{ latitude: number; longitude: number } | null>(null);
 
   // 🎤 Kirim audio + foto ke backend via WS
   useMicUtterance({
@@ -79,6 +81,15 @@ const Home: React.FC = () => {
           console.warn('⚠️ Gagal mendapatkan lokasi:', e);
         }
 
+        // Token
+        let token = null;
+        try {
+          token = await AsyncStorage.getItem('access_token');
+          console.log("Token akses diperoleh untuk WS:", token);
+        } catch (e) {
+          console.warn('⚠️ Gagal mendapatkan token akses:', e);
+        }
+
         setSending(true);
         setWaitingResponse(true);
         const payload = {
@@ -87,6 +98,7 @@ const Home: React.FC = () => {
           image: imageB64,
           latitude: coords?.latitude || lastLocation?.latitude || null,
           longitude: coords?.longitude || lastLocation?.longitude || null,
+          access_token: token,
         };
 
         const jsonStr = JSON.stringify(payload);
@@ -104,55 +116,65 @@ const Home: React.FC = () => {
 
   // 📡 Init WebSocket client
   useEffect(() => {
-    ws.current = new WebSocket(WS_ENDPOINT);
-
-    ws.current.onopen = () => {
-      console.log("✅ WebSocket connected");
-    };
-
-    ws.current.onmessage = (event) => {
+    const connectWS = async () => {
       try {
-        const msg = JSON.parse(event.data);
-        console.log("📝 WS message diterima:", msg);
-
-        if (msg.token) {
-          setLastText((prev) => prev + msg.token);
-          if (msg.token.trim()) speak(msg.token);
+        const token = await AsyncStorage.getItem('access_token');
+        if (!token) {
+          console.warn("❌ Tidak ada token akses, WS tidak diinisialisasi");
+          return;
         }
 
-        if (msg.image_token) {
-          setLastText((prev) => prev + msg.image_token);
-          if (msg.image_token.trim()) speak(msg.image_token);
-        }
+        console.log("Token ditemukan, Menghubungkan ke WS...");
+        ws.current = new WebSocket(WS_ENDPOINT + `?token=${token}`);
 
-        if (msg.event === "end") {
-          console.log("✅ Streaming selesai");
-          // Jangan dibacakan, cukup log atau tampilkan status
-          setWaitingResponse(false);
-        }
+        ws.current.onopen = () => {
+          console.log("✅ WebSocket connected");
+          console.log("Token digunakan:", token)
+        };
 
-        if (msg.error) {
-          console.error("❌ Error dari backend:", msg.error);
-          Alert.alert("Error", msg.error);
-          setWaitingResponse(false);
-        }
-      } catch (e) {
-        console.warn("⚠️ Gagal parse WS message:", event.data, e);
+        ws.current.onmessage = (event) => {
+          try{
+            const msg = JSON.parse(event.data);
+            console.log("📥 Pesan diterima:", msg);
+
+            if (msg.token) {
+              setLastText((prev) => prev + msg.token);
+              if (msg.token.trim()) speak(msg.token);
+            }
+
+            if (msg.event === 'end') {
+              console.log("🛑 Percakapan selesai");
+              setWaitingResponse(false);
+            }
+
+            if (msg.error) {
+              console.error("❗ Error dari server:", msg.error);
+              Alert.alert("Error dari server", msg.error);
+              setWaitingResponse(false);
+            }
+          } catch(e) {
+            console.warn("⚠️ Gagal parsing pesan WS:", e);
+          }
+        };
+
+        ws.current.onerror = (err: any) => {
+          console.error("❌ WebSocket error:", err.message || err);
+        };
+
+        ws.current.onclose = (e) => {
+          console.log(`❌ WebSocket closed (code: ${e.code}, reason: ${e.reason})`);
+        };
+      } catch (err) {
+        console.error("❌ Gagal inisialisasi WebSocket:", err);
       }
     };
 
-
-    ws.current.onerror = (err: any) => {
-      console.error("❌ WebSocket error:", err.message || err);
-    };
-
-    ws.current.onclose = (e) => {
-      console.log("🔌 WebSocket closed:", e.code, e.reason);
-    };
+    connectWS();
 
     return () => {
       ws.current?.close();
-    };
+    }
+
   }, []);
 
   // 🎤 Kamera + Mic + TTS
