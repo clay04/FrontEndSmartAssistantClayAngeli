@@ -6,35 +6,10 @@ import { initTTS, speak } from '../../utils/tts';
 import { useMicUtterance } from '../../hog/useMicUtterence';
 import { getCurrentLocation } from '../../utils/Location';
 
-import RNFS from 'react-native-fs';
-import ImageResizer from 'react-native-image-resizer';
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSpeechToText } from '../../hog/useSpeechToText';
 
-const WS_ENDPOINT = 'ws://192.168.242.131:5000/voice/ws'; // WebSocket backend
-
-// 🔧 Helper: file → base64
-async function fileToBase64(uri: string): Promise<string> {
-  const path = uri.replace('file://', '');
-  return RNFS.readFile(path, 'base64');
-}
-
-// 🔧 Helper: kompres foto biar nggak kegedean
-async function compressImage(uri: string): Promise<string> {
-  try {
-    const resized = await ImageResizer.createResizedImage(
-      uri,
-      512, // max width
-      512, // max height
-      'JPEG',
-      80   // quality %
-    );
-    return resized.uri;
-  } catch (e) {
-    console.warn("⚠️ Gagal resize image, pakai original:", e);
-    return uri;
-  }
-}
+const WS_ENDPOINT = 'ws://192.168.110.197:5000/voice/ws'; // WebSocket backend
 
 const Home: React.FC = () => {
   const camRef = useRef<CameraStreamHandle>(null);
@@ -48,35 +23,31 @@ const Home: React.FC = () => {
   const [micOn, setMicOn] = useState<boolean>(true);
   const [lastLocation, ] = useState<{ latitude: number; longitude: number } | null>(null);
 
+  const { text, isReacognizing, start, stop } = useSpeechToText();
+
   // 🎤 Kirim audio + foto ke backend via WS
   useMicUtterance({
     enabled: micOn && permitted,
-    onUtterance: async (audioUri, base64) => {
+    onUtterance: async (audioUri) => {
+      console.log("🎤 Utterance recorded:", audioUri);
+      await stop();
+
       if (!camRef.current?.isReady()) {
         console.log("⚠️ Skip snapshot: camera not ready");
         return;
       }
+
       const snap = await camRef.current.takeSnapshot();
-      setLastPhoto(snap ?? null);
+      if (!snap) return;
 
       try {
-        if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
-          console.warn("❌ WebSocket belum siap");
-          return;
-        }
-
-        // 📸 Image
-        let imageB64: string | null = null;
-        if (snap) {
-          const resizedUri = await compressImage(snap);
-          imageB64 = await fileToBase64(resizedUri);
-          console.log("📸 Image base64 size:", imageB64.length);
-        }
+        const blob = await fetch(snap).then(r => r.blob());
 
         // Lokasi
         let coords = null;
         try {
           coords = await getCurrentLocation();
+          console.log("📍 Lokasi saat ini:", coords?.latitude, coords?.longitude);
         } catch (e) {
           console.warn('⚠️ Gagal mendapatkan lokasi:', e);
         }
@@ -90,12 +61,21 @@ const Home: React.FC = () => {
           console.warn('⚠️ Gagal mendapatkan token akses:', e);
         }
 
+        if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+          console.warn("❌ WebSocket belum siap");
+          return;
+        }
+
         setSending(true);
         setWaitingResponse(true);
+
+        ws.current?.send(JSON.stringify({ event: "upload_image_start" }));
+        ws.current?.send(blob);
+
         const payload = {
           type: "request",
-          audio: base64,
-          image: imageB64,
+          text: text || isReacognizing,
+          image: true,
           latitude: coords?.latitude || lastLocation?.latitude || null,
           longitude: coords?.longitude || lastLocation?.longitude || null,
           access_token: token,
@@ -103,9 +83,10 @@ const Home: React.FC = () => {
 
         const jsonStr = JSON.stringify(payload);
         console.log("📦 Payload JSON size (bytes):", new TextEncoder().encode(jsonStr).length);
-
-        ws.current.send(jsonStr);
         console.log("📤 Request dikirim ke WS");
+        ws.current?.send(jsonStr)
+
+        setSending(false);
       } catch (e: any) {
         console.warn('Upload gagal via WS', e?.message || e);
       } finally {
@@ -136,6 +117,11 @@ const Home: React.FC = () => {
           try{
             const msg = JSON.parse(event.data);
             console.log("📥 Pesan diterima:", msg);
+
+            if (msg.event === "image_uploaded") {
+              console.log("Gambar tersimpan di server:", msg.path)
+              setLastPhoto(msg.path)
+            }
 
             if (msg.token) {
               setLastText((prev) => prev + msg.token);
