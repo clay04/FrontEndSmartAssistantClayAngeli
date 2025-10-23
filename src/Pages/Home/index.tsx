@@ -10,6 +10,7 @@ import RNFS from 'react-native-fs';
 import ImageResizer from 'react-native-image-resizer';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSpeechToText } from '../../hog/useSpeechToText';
 
 const WS_ENDPOINT = 'ws://192.168.242.131:5000/voice/ws'; // WebSocket backend
 
@@ -47,6 +48,8 @@ const Home: React.FC = () => {
   const [lastText, setLastText] = useState<string>('');
   const [micOn, setMicOn] = useState<boolean>(true);
   const [lastLocation, ] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  const {text, isReacognizing, start, stop} = useSpeechToText()
 
   // 🎤 Kirim audio + foto ke backend via WS
   useMicUtterance({
