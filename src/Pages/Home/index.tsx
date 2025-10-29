@@ -12,7 +12,7 @@ import ImageResizer from 'react-native-image-resizer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSpeechToText } from '../../hog/useSpeechToText';
 
-const WS_ENDPOINT = 'ws://192.168.242.131:5000/voice/ws'; // WebSocket backend
+const WS_ENDPOINT = 'ws://192.168.68.131:5000/voice/ws'; // WebSocket backend
 
 // 🔧 Helper: file → base64
 async function fileToBase64(uri: string): Promise<string> {
@@ -47,74 +47,69 @@ const Home: React.FC = () => {
   const [lastPhoto, setLastPhoto] = useState<string | null>(null);
   const [lastText, setLastText] = useState<string>('');
   const [micOn, setMicOn] = useState<boolean>(true);
-  const [lastLocation, ] = useState<{ latitude: number; longitude: number } | null>(null);
-
-  const {text, isReacognizing, start, stop} = useSpeechToText()
+  const [lastLocation, setLastLocation] = useState<{ latitude: number; longitude: number } | null>(null);
 
   // 🎤 Kirim audio + foto ke backend via WS
-  useMicUtterance({
-    enabled: micOn && permitted,
-    onUtterance: async (audioUri, base64) => {
-      if (!camRef.current?.isReady()) {
-        console.log("⚠️ Skip snapshot: camera not ready");
+  const onSpeechResult = useCallback(async (speechText: string) => {
+    console.log('🗣️ Hasil STT:', speechText);
+
+    try {
+      if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+        console.warn('❌ WebSocket belum siap');
         return;
       }
-      const snap = await camRef.current.takeSnapshot();
-      setLastPhoto(snap ?? null);
 
-      try {
-        if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
-          console.warn("❌ WebSocket belum siap");
-          return;
-        }
+      // 📸 Ambil snapshot dari kamera
+      let imageB64: string | null = null;
+      if (camRef.current?.isReady()) {
+        const snap = await camRef.current.takeSnapshot();
+        setLastPhoto(snap ?? null);
 
-        // 📸 Image
-        let imageB64: string | null = null;
         if (snap) {
           const resizedUri = await compressImage(snap);
           imageB64 = await fileToBase64(resizedUri);
-          console.log("📸 Image base64 size:", imageB64.length);
         }
+      }
 
-        // Lokasi
-        let coords = null;
+      // 📍 Ambil lokasi terakhir
+      let coords = null;
         try {
           coords = await getCurrentLocation();
+          console.log("📍 Lokasi saat ini:", coords?.latitude, coords?.longitude);
         } catch (e) {
           console.warn('⚠️ Gagal mendapatkan lokasi:', e);
         }
 
-        // Token
-        let token = null;
-        try {
-          token = await AsyncStorage.getItem('access_token');
-          console.log("Token akses diperoleh untuk WS:", token);
-        } catch (e) {
-          console.warn('⚠️ Gagal mendapatkan token akses:', e);
-        }
+      // 🔑 Ambil token akses
+      const token = await AsyncStorage.getItem('access_token');
 
-        setSending(true);
-        setWaitingResponse(true);
-        const payload = {
-          type: "request",
-          audio: base64,
-          image: imageB64,
-          latitude: coords?.latitude || lastLocation?.latitude || null,
-          longitude: coords?.longitude || lastLocation?.longitude || null,
-          access_token: token,
-        };
+      // 📤 Buat payload dan kirim ke backend
+      const payload = {
+        type: 'request',
+        text: speechText,
+        image: imageB64,
+        latitude: coords?.latitude || lastLocation?.latitude || null,
+        longitude: coords?.longitude || lastLocation?.longitude || null,
+        access_token: token,
+      };
 
-        const jsonStr = JSON.stringify(payload);
-        console.log("📦 Payload JSON size (bytes):", new TextEncoder().encode(jsonStr).length);
+      const jsonStr = JSON.stringify(payload);
+      //console.log('📦 Kirim payload:', jsonStr);
 
-        ws.current.send(jsonStr);
-        console.log("📤 Request dikirim ke WS");
-      } catch (e: any) {
-        console.warn('Upload gagal via WS', e?.message || e);
-      } finally {
-        setSending(false);
-      }
-    },
+      ws.current.send(jsonStr);
+      setSending(true);
+      setWaitingResponse(true);
+    } catch (err) {
+      console.error('❌ Gagal kirim STT:', err);
+    } finally {
+      setSending(false);
+    }
+  }, [lastLocation]);
+
+  // 🎙️ Inisialisasi Speech-to-Text
+  useSpeechToText({
+    active: micOn && permitted && !waitingResponse,
+    onResult: onSpeechResult,
   });
 
   // 📡 Init WebSocket client
@@ -148,6 +143,7 @@ const Home: React.FC = () => {
             if (msg.event === 'end') {
               console.log("🛑 Percakapan selesai");
               setWaitingResponse(false);
+              setMicOn(true);
             }
 
             if (msg.error) {
