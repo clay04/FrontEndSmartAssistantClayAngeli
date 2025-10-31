@@ -1,17 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Button, Image, StyleSheet, Text, View, ScrollView } from 'react-native';
+import { ActivityIndicator, Button, Image, StyleSheet, Text, View, ScrollView } from 'react-native';
 import CameraStream, { CameraStreamHandle } from '../../components/CameraStream';
 import { ensureAllPermissions } from '../../utils/permission';
 import { initTTS, speak } from '../../utils/tts';
 import { useMicUtterance } from '../../hog/useMicUtterence';
 import { getCurrentLocation } from '../../utils/Location';
-
 import RNFS from 'react-native-fs';
 import ImageResizer from 'react-native-image-resizer';
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { RadialGradientBackground } from '../../components';
 
-const WS_ENDPOINT = 'ws://192.168.110.196:5000/voice/ws'; // WebSocket backend
+const WS_ENDPOINT = 'ws://192.168.1.35:5000/voice/ws'; // WebSocket backend
 
 // 🔧 Helper: file → base64
 async function fileToBase64(uri: string): Promise<string> {
@@ -22,16 +21,10 @@ async function fileToBase64(uri: string): Promise<string> {
 // 🔧 Helper: kompres foto biar nggak kegedean
 async function compressImage(uri: string): Promise<string> {
   try {
-    const resized = await ImageResizer.createResizedImage(
-      uri,
-      512, // max width
-      512, // max height
-      'JPEG',
-      80   // quality %
-    );
+    const resized = await ImageResizer.createResizedImage(uri, 512, 512, 'JPEG', 80);
     return resized.uri;
   } catch (e) {
-    console.warn("⚠️ Gagal resize image, pakai original:", e);
+    console.warn('⚠️ Gagal resize image, pakai original:', e);
     return uri;
   }
 }
@@ -46,228 +39,153 @@ const Home: React.FC = () => {
   const [lastPhoto, setLastPhoto] = useState<string | null>(null);
   const [lastText, setLastText] = useState<string>('');
   const [micOn, setMicOn] = useState<boolean>(true);
-  const [lastLocation, ] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [lastLocation, setLastLocation] = useState<{ latitude: number; longitude: number } | null>(null);
 
   // 🎤 Kirim audio + foto ke backend via WS
   useMicUtterance({
     enabled: micOn && permitted,
     onUtterance: async (audioUri, base64) => {
-      if (!camRef.current?.isReady()) {
-        console.log("⚠️ Skip snapshot: camera not ready");
-        return;
-      }
-      const snap = await camRef.current.takeSnapshot();
-      setLastPhoto(snap ?? null);
+      if (!camRef.current?.isReady()) return;
 
       try {
-        if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
-          console.warn("❌ WebSocket belum siap");
-          return;
-        }
+        const photoUri = await camRef.current.takePicture();
+        const compressed = await compressImage(photoUri);
+        const base64Image = await fileToBase64(compressed);
 
-        // 📸 Image
-        let imageB64: string | null = null;
-        if (snap) {
-          const resizedUri = await compressImage(snap);
-          imageB64 = await fileToBase64(resizedUri);
-          console.log("📸 Image base64 size:", imageB64.length);
-        }
-
-        // Lokasi
-        let coords = null;
-        try {
-          coords = await getCurrentLocation();
-        } catch (e) {
-          console.warn('⚠️ Gagal mendapatkan lokasi:', e);
-        }
-
-        // Token
-        let token = null;
-        try {
-          token = await AsyncStorage.getItem('access_token');
-          console.log("Token akses diperoleh untuk WS:", token);
-        } catch (e) {
-          console.warn('⚠️ Gagal mendapatkan token akses:', e);
-        }
-
-        setSending(true);
-        setWaitingResponse(true);
-        const payload = {
-          type: "request",
+        const payload = JSON.stringify({
+          type: 'voice',
           audio: base64,
-          image: imageB64,
-          latitude: coords?.latitude || lastLocation?.latitude || null,
-          longitude: coords?.longitude || lastLocation?.longitude || null,
-          access_token: token,
-        };
+          image: base64Image,
+          location: lastLocation,
+        });
 
-        const jsonStr = JSON.stringify(payload);
-        console.log("📦 Payload JSON size (bytes):", new TextEncoder().encode(jsonStr).length);
-
-        ws.current.send(jsonStr);
-        console.log("📤 Request dikirim ke WS");
-      } catch (e: any) {
-        console.warn('Upload gagal via WS', e?.message || e);
-      } finally {
-        setSending(false);
+        ws.current?.send(payload);
+        setLastPhoto(photoUri);
+        setWaitingResponse(true);
+      } catch (e) {
+        console.warn('🎤 Gagal kirim data:', e);
       }
     },
   });
 
-  // 📡 Init WebSocket client
+  // 🌍 ambil lokasi
+  const loadLocation = useCallback(async () => {
+    const loc = await getCurrentLocation();
+    setLastLocation(loc);
+  }, []);
+
+  // 🚀 init permission + TTS + WS
   useEffect(() => {
-    const connectWS = async () => {
-      try {
-        const token = await AsyncStorage.getItem('access_token');
-        if (!token) {
-          console.warn("❌ Tidak ada token akses, WS tidak diinisialisasi");
-          return;
-        }
+    (async () => {
+      const ok = await ensureAllPermissions();
+      setPermitted(ok);
+      await initTTS();
+      await loadLocation();
 
-        console.log("Token ditemukan, Menghubungkan ke WS...");
-        ws.current = new WebSocket(WS_ENDPOINT + `?token=${token}`);
-
-        ws.current.onopen = () => {
-          console.log("✅ WebSocket connected");
-          console.log("Token digunakan:", token)
-        };
-
-        ws.current.onmessage = (event) => {
-          try{
-            const msg = JSON.parse(event.data);
-            console.log("📥 Pesan diterima:", msg);
-
-            if (msg.token) {
-              setLastText((prev) => prev + msg.token);
-              if (msg.token.trim()) speak(msg.token);
-            }
-
-            if (msg.event === 'end') {
-              console.log("🛑 Percakapan selesai");
-              setWaitingResponse(false);
-            }
-
-            if (msg.error) {
-              console.error("❗ Error dari server:", msg.error);
-              Alert.alert("Error dari server", msg.error);
-              setWaitingResponse(false);
-            }
-          } catch(e) {
-            console.warn("⚠️ Gagal parsing pesan WS:", e);
+      ws.current = new WebSocket(WS_ENDPOINT);
+      ws.current.onopen = () => console.log('🌐 WS Connected');
+      ws.current.onmessage = (msg) => {
+        try {
+          const data = JSON.parse(msg.data);
+          if (data?.text) {
+            setLastText(data.text);
+            speak(data.text);
           }
-        };
+        } catch (e) {
+          console.warn('WS parse error:', e);
+        }
+        setWaitingResponse(false);
+      };
+      ws.current.onerror = (e) => console.error('WS error:', e);
+      ws.current.onclose = () => console.log('🔌 WS Closed');
+    })();
 
-        ws.current.onerror = (err: any) => {
-          console.error("❌ WebSocket error:", err.message || err);
-        };
-
-        ws.current.onclose = (e) => {
-          console.log(`❌ WebSocket closed (code: ${e.code}, reason: ${e.reason})`);
-        };
-      } catch (err) {
-        console.error("❌ Gagal inisialisasi WebSocket:", err);
-      }
-    };
-
-    connectWS();
-
-    return () => {
-      ws.current?.close();
-    }
-
-  }, []);
-
-  // 🎤 Kamera + Mic + TTS
-  const init = useCallback(async () => {
-    const ok = await ensureAllPermissions();
-    setPermitted(ok);
-    await initTTS('id-ID');
-    if (!ok) Alert.alert('Izin dibutuhkan', 'Aktifkan izin kamera dan mikrofon.');
-  }, []);
-
-  useEffect(() => {
-    init();
-  }, [init]);
+    return () => ws.current?.close();
+  }, [loadLocation]);
 
   return (
-    <View style={styles.container}>
-      <ScrollView>
-        <Text style={styles.title}>Smart Assistant (Realtime Streaming)</Text>
+    <RadialGradientBackground>
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.title}>Smart Assistant</Text>
 
-        <CameraStream ref={camRef} />
-
-        <View style={styles.row}>
-          <Text style={[styles.badge, { backgroundColor: micOn ? '#dff7df' : '#ffecec' }]}>
-            Mic: {micOn ? 'ON (streaming)' : 'OFF'}
-          </Text>
-        </View>
-
-        <View style={styles.row}>
-          <Button title={micOn ? 'Matikan Mic' : 'Nyalakan Mic'} onPress={() => setMicOn((v) => !v)} />
-          <View style={{ width: 12 }} />
-          <Button
-            title="Ambil Foto Sekarang"
-            onPress={async () => {
-              if (!camRef.current?.isReady()) {
-                Alert.alert("Kamera belum siap", "Tunggu kamera aktif dulu.");
-                return;
-              }
-              const snap = await camRef.current.takeSnapshot();
-              setLastPhoto(snap ?? null);
-            }}
-          />
-        </View>
-
-        {sending && (
-          <View style={styles.row}>
-            <ActivityIndicator />
-            <Text style={{ marginLeft: 8 }}>Mengirim ke backend...</Text>
-          </View>
-        )}
-
-        {waitingResponse && (
-          <View style={styles.row}>
-            <ActivityIndicator color="blue"/>
-            <Text style={{ marginLeft: 8 }}>Menunggu respons...</Text>
-          </View>
-        )}
-
-        <View style={styles.previewRow}>
-          {lastPhoto ? (
-            <Image source={{ uri: lastPhoto }} style={styles.preview} />
+        {/* Kamera */}
+        <View style={styles.cameraBox}>
+          {permitted ? (
+            <CameraStream ref={camRef} />
           ) : (
-            <View style={styles.placeholder}><Text>Belum ada snapshot</Text></View>
+            <View style={styles.permissionBox}>
+              <Text style={{ color: '#ccc' }}>Menunggu izin kamera...</Text>
+            </View>
           )}
         </View>
 
-        {!!lastText && (
-          <View style={styles.responseBox}>
-            <Text style={styles.responseLabel}>Respons (streaming):</Text>
-            <Text>{lastText}</Text>
-          </View>
-        )}
+        {/* Loading, hasil foto, dan teks respon */}
+        {waitingResponse && <ActivityIndicator color="#fff" size="small" />}
+        {lastPhoto && <Image source={{ uri: lastPhoto }} style={styles.photo} />}
+        {lastText ? <Text style={styles.response}>{lastText}</Text> : null}
 
-        {lastLocation && (
-          <View style={styles.responseBox}>
-            <Text style={styles.responseLabel}>Lokasi Terakhir:</Text>
-            <Text>Lat: {lastLocation.latitude}, Lon: {lastLocation.longitude}</Text>
-          </View>
-        )}
+        {/* Tombol Mic */}
+        <View style={styles.buttonWrapper}>
+          <Button
+            title={micOn ? 'Matikan Mic' : 'Nyalakan Mic'}
+            onPress={() => setMicOn(!micOn)}
+            color={micOn ? '#b43aff' : '#4e9bff'}
+          />
+        </View>
+
+        <Text style={styles.footer}>v1.0 — WebSocket: {WS_ENDPOINT}</Text>
       </ScrollView>
-    </View>
+    </RadialGradientBackground>
   );
 };
 
 export default Home;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', padding: 16 },
-  title: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  badge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: '#eee', fontSize: 12 },
-  previewRow: { marginTop: 14, alignItems: 'center' },
-  preview: { width: 240, height: 240, borderRadius: 8, resizeMode: 'cover' },
-  placeholder: { width: 240, height: 240, borderRadius: 8, backgroundColor: '#f2f2f2', alignItems: 'center', justifyContent: 'center' },
-  responseBox: { marginTop: 16, padding: 12, backgroundColor: '#f7f7f7', borderRadius: 8 },
-  responseLabel: { fontWeight: '700', marginBottom: 6 },
+  container: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 15,
+  },
+  cameraBox: {
+    width: 300,
+    height: 300,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    borderWidth: 1.5,
+    borderColor: '#a58ad1',
+    marginBottom: 15,
+  },
+  permissionBox: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photo: {
+    width: 120,
+    height: 120,
+    borderRadius: 8,
+    marginVertical: 10,
+  },
+  response: {
+    marginTop: 10,
+    fontSize: 16,
+    fontWeight: '500',
+    textAlign: 'center',
+    color: '#fff',
+  },
+  buttonWrapper: {
+    marginVertical: 10,
+  },
+  footer: {
+    fontSize: 12,
+    color: '#ccc',
+    marginTop: 15,
+  },
 });
