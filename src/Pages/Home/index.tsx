@@ -3,16 +3,15 @@ import { ActivityIndicator, Alert, Button, Image, StyleSheet, Text, View, Scroll
 import CameraStream, { CameraStreamHandle } from '../../components/CameraStream';
 import { ensureAllPermissions } from '../../utils/permission';
 import { initTTS, speak } from '../../utils/tts';
-import { useMicUtterance } from '../../hog/useMicUtterence';
 import { getCurrentLocation } from '../../utils/Location';
+import { initSocket, getSocket } from '../../socket';
 
 import RNFS from 'react-native-fs';
 import ImageResizer from 'react-native-image-resizer';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSpeechToText } from '../../hog/useSpeechToText';
-
-const WS_ENDPOINT = 'ws://192.168.68.131:5000/voice/ws'; // WebSocket backend
+import Tts from 'react-native-tts';
 
 // 🔧 Helper: file → base64
 async function fileToBase64(uri: string): Promise<string> {
@@ -23,23 +22,17 @@ async function fileToBase64(uri: string): Promise<string> {
 // 🔧 Helper: kompres foto biar nggak kegedean
 async function compressImage(uri: string): Promise<string> {
   try {
-    const resized = await ImageResizer.createResizedImage(
-      uri,
-      512, // max width
-      512, // max height
-      'JPEG',
-      80   // quality %
-    );
+    const resized = await ImageResizer.createResizedImage(uri, 512, 512, 'JPEG', 80);
     return resized.uri;
   } catch (e) {
-    console.warn("⚠️ Gagal resize image, pakai original:", e);
+    console.warn("⚠️ Gagal resize image:", e);
     return uri;
   }
 }
 
 const Home: React.FC = () => {
   const camRef = useRef<CameraStreamHandle>(null);
-  const ws = useRef<WebSocket | null>(null);
+  const socket = useRef<any>(null);
 
   const [permitted, setPermitted] = useState(false);
   const [sending, setSending] = useState(false);
@@ -49,17 +42,24 @@ const Home: React.FC = () => {
   const [micOn, setMicOn] = useState<boolean>(true);
   const [lastLocation, setLastLocation] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  // 🎤 Kirim audio + foto ke backend via WS
+  const [socketReady, setSocketReady] = useState(false);
+  const socketRef = useRef<any>(null);
+
+  // 🎤 Kirim audio + foto ke backend via Socket.IO
   const onSpeechResult = useCallback(async (speechText: string) => {
     console.log('🗣️ Hasil STT:', speechText);
 
     try {
-      if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
-        console.warn('❌ WebSocket belum siap');
+      const s = socketRef.current;
+      if (!socketRef.current || !socketRef.current.connected) {
+        console.warn('❌ Socket.IO belum siap atau belum terkoneksi');
         return;
       }
 
-      // 📸 Ambil snapshot dari kamera
+      // Kirim text ke server
+      s.emit("user_message", { message: speechText });
+
+      // 📸 Ambil snapshot
       let imageB64: string | null = null;
       if (camRef.current?.isReady()) {
         const snap = await camRef.current.takeSnapshot();
@@ -71,21 +71,21 @@ const Home: React.FC = () => {
         }
       }
 
-      // 📍 Ambil lokasi terakhir
+      // 📍 Ambil lokasi
       let coords = null;
-        try {
-          coords = await getCurrentLocation();
-          console.log("📍 Lokasi saat ini:", coords?.latitude, coords?.longitude);
-        } catch (e) {
-          console.warn('⚠️ Gagal mendapatkan lokasi:', e);
-        }
+      try {
+        coords = await getCurrentLocation();
+        setLastLocation(coords);
+        console.log("📍 Lokasi:", coords?.latitude, coords?.longitude);
+      } catch (e) {
+        console.warn('⚠️ Gagal ambil lokasi:', e);
+      }
 
       // 🔑 Ambil token akses
       const token = await AsyncStorage.getItem('access_token');
 
-      // 📤 Buat payload dan kirim ke backend
+      // 📤 Buat payload
       const payload = {
-        type: 'request',
         text: speechText,
         image: imageB64,
         latitude: coords?.latitude || lastLocation?.latitude || null,
@@ -93,14 +93,13 @@ const Home: React.FC = () => {
         access_token: token,
       };
 
-      const jsonStr = JSON.stringify(payload);
-      //console.log('📦 Kirim payload:', jsonStr);
+      socketRef.current.emit('voice_message', payload);
+      console.log('📦 Mengirim payload:', payload);
 
-      ws.current.send(jsonStr);
       setSending(true);
       setWaitingResponse(true);
     } catch (err) {
-      console.error('❌ Gagal kirim STT:', err);
+      console.error('❌ Gagal kirim data:', err);
     } finally {
       setSending(false);
     }
@@ -108,80 +107,51 @@ const Home: React.FC = () => {
 
   // 🎙️ Inisialisasi Speech-to-Text
   useSpeechToText({
-    active: micOn && permitted && !waitingResponse,
+    active: micOn && permitted && socketReady && !waitingResponse,
     onResult: onSpeechResult,
   });
 
-  // 📡 Init WebSocket client
+  // 📡 Init Socket.IO client
   useEffect(() => {
-    const connectWS = async () => {
-      try {
-        const token = await AsyncStorage.getItem('access_token');
-        if (!token) {
-          console.warn("❌ Tidak ada token akses, WS tidak diinisialisasi");
-          return;
-        }
+    const setupSocket = async () => {
+      const s = await initSocket(() => {
+        console.log("⚙️ Socket siap digunakan");
+        setSocketReady(true);
+      });
 
-        console.log("Token ditemukan, Menghubungkan ke WS...");
-        ws.current = new WebSocket(WS_ENDPOINT + `?token=${token}`);
+      socketRef.current = s;
 
-        ws.current.onopen = () => {
-          console.log("✅ WebSocket connected");
-          console.log("Token digunakan:", token)
-        };
+      s.on("response_token", (data) => {
+        console.log("📥 Dapat response:", data);
+        Tts.stop()
+        Tts.speak(data.token)
+        setLastText((prev) => prev + data.token);
+      });
 
-        ws.current.onmessage = (event) => {
-          try{
-            const msg = JSON.parse(event.data);
-            console.log("📥 Pesan diterima:", msg);
+      s.on("error", (data) => {
+        console.log("💥 Error dari server:", data.error);
+        setLastText((prev) => prev + data.error);
+      });
 
-            if (msg.token) {
-              setLastText((prev) => prev + msg.token);
-              if (msg.token.trim()) speak(msg.token);
-            }
-
-            if (msg.event === 'end') {
-              console.log("🛑 Percakapan selesai");
-              setWaitingResponse(false);
-              setMicOn(true);
-            }
-
-            if (msg.error) {
-              console.error("❗ Error dari server:", msg.error);
-              Alert.alert("Error dari server", msg.error);
-              setWaitingResponse(false);
-            }
-          } catch(e) {
-            console.warn("⚠️ Gagal parsing pesan WS:", e);
-          }
-        };
-
-        ws.current.onerror = (err: any) => {
-          console.error("❌ WebSocket error:", err.message || err);
-        };
-
-        ws.current.onclose = (e) => {
-          console.log(`❌ WebSocket closed (code: ${e.code}, reason: ${e.reason})`);
-        };
-      } catch (err) {
-        console.error("❌ Gagal inisialisasi WebSocket:", err);
-      }
+      s.on("end", () => {
+        console.log("Sesi selesai");
+        setWaitingResponse(false);
+      });
     };
 
-    connectWS();
+    setupSocket();
 
     return () => {
-      ws.current?.close();
-    }
-
+      socketRef.current?.disconnect();
+    };
   }, []);
 
-  // 🎤 Kamera + Mic + TTS
+  // 🎤 Inisialisasi Kamera + Mic + TTS
   const init = useCallback(async () => {
     const ok = await ensureAllPermissions();
     setPermitted(ok);
     await initTTS('id-ID');
-    if (!ok) Alert.alert('Izin dibutuhkan', 'Aktifkan izin kamera dan mikrofon.');
+    if (!ok) Alert.alert('Izin dibutuhkan', 'Aktifkan izin kamera & mikrofon.');
   }, []);
 
   useEffect(() => {
@@ -191,7 +161,7 @@ const Home: React.FC = () => {
   return (
     <View style={styles.container}>
       <ScrollView>
-        <Text style={styles.title}>Smart Assistant (Realtime Streaming)</Text>
+        <Text style={styles.title}>Smart Assistant (Socket.IO Streaming)</Text>
 
         <CameraStream ref={camRef} />
 
@@ -202,13 +172,13 @@ const Home: React.FC = () => {
         </View>
 
         <View style={styles.row}>
-          <Button title={micOn ? 'Matikan Mic' : 'Nyalakan Mic'} onPress={() => setMicOn((v) => !v)} />
+          <Button title={micOn ? 'Matikan Mic' : 'Nyalakan Mic'} onPress={() => setMicOn(v => !v)} />
           <View style={{ width: 12 }} />
           <Button
             title="Ambil Foto Sekarang"
             onPress={async () => {
               if (!camRef.current?.isReady()) {
-                Alert.alert("Kamera belum siap", "Tunggu kamera aktif dulu.");
+                Alert.alert('Kamera belum siap', 'Tunggu kamera aktif dulu.');
                 return;
               }
               const snap = await camRef.current.takeSnapshot();
@@ -220,14 +190,14 @@ const Home: React.FC = () => {
         {sending && (
           <View style={styles.row}>
             <ActivityIndicator />
-            <Text style={{ marginLeft: 8 }}>Mengirim ke backend...</Text>
+            <Text style={{ marginLeft: 8 }}>Mengirim ke server...</Text>
           </View>
         )}
 
         {waitingResponse && (
           <View style={styles.row}>
-            <ActivityIndicator color="blue"/>
-            <Text style={{ marginLeft: 8 }}>Menunggu respons...</Text>
+            <ActivityIndicator color="blue" />
+            <Text style={{ marginLeft: 8 }}>Menunggu respons AI...</Text>
           </View>
         )}
 
