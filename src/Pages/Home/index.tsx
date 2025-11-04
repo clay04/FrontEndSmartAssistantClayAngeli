@@ -10,7 +10,7 @@ import ImageResizer from 'react-native-image-resizer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RadialGradientBackground } from '../../components';
 
-const WS_ENDPOINT = 'ws://192.168.1.35:5000/voice/ws'; // WebSocket backend
+const WS_ENDPOINT = 'ws://192.168.110.196:5000/voice/ws'; // WebSocket backend
 
 // 🔧 Helper: file → base64
 async function fileToBase64(uri: string): Promise<string> {
