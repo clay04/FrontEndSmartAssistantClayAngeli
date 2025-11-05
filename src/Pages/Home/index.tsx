@@ -4,6 +4,7 @@ import CameraStream, { CameraStreamHandle } from '../../components/CameraStream'
 import { ensureAllPermissions } from '../../utils/permission';
 import { initTTS, speak } from '../../utils/tts';
 import { getCurrentLocation } from '../../utils/Location';
+import { ttsState } from '../../utils/tts';
 import { initSocket, getSocket } from '../../socket';
 
 import RNFS from 'react-native-fs';
@@ -18,6 +19,13 @@ async function fileToBase64(uri: string): Promise<string> {
   const path = uri.replace('file://', '');
   return RNFS.readFile(path, 'base64');
 }
+
+// 🎙️ Komponen terpisah agar STT tidak restart tiap re-render
+const SpeechManager = React.memo(({ active, onResult }: { active: boolean; onResult: (text: string) => void }) => {
+  useSpeechToText({ active, onResult });
+  return null;
+});
+
 
 // 🔧 Helper: kompres foto biar nggak kegedean
 async function compressImage(uri: string): Promise<string> {
@@ -45,6 +53,8 @@ const Home: React.FC = () => {
   const [socketReady, setSocketReady] = useState(false);
   const socketRef = useRef<any>(null);
 
+  const [showMenu, setShowMenu] = useState(false);
+
   // 🎤 Kirim audio + foto ke backend via Socket.IO
   const onSpeechResult = useCallback(async (speechText: string) => {
     console.log('🗣️ Hasil STT:', speechText);
@@ -71,16 +81,6 @@ const Home: React.FC = () => {
         }
       }
 
-      // 📍 Ambil lokasi
-      let coords = null;
-      try {
-        coords = await getCurrentLocation();
-        setLastLocation(coords);
-        console.log("📍 Lokasi:", coords?.latitude, coords?.longitude);
-      } catch (e) {
-        console.warn('⚠️ Gagal ambil lokasi:', e);
-      }
-
       // 🔑 Ambil token akses
       const token = await AsyncStorage.getItem('access_token');
 
@@ -88,8 +88,6 @@ const Home: React.FC = () => {
       const payload = {
         text: speechText,
         image: imageB64,
-        latitude: coords?.latitude || lastLocation?.latitude || null,
-        longitude: coords?.longitude || lastLocation?.longitude || null,
         access_token: token,
       };
 
@@ -105,14 +103,10 @@ const Home: React.FC = () => {
     }
   }, [lastLocation]);
 
-  // 🎙️ Inisialisasi Speech-to-Text
-  useSpeechToText({
-    active: micOn && permitted && socketReady && !waitingResponse,
-    onResult: onSpeechResult,
-  });
-
   // 📡 Init Socket.IO client
   useEffect(() => {
+    let interval: NodeJS.Timeout;
+
     const setupSocket = async () => {
       const s = await initSocket(() => {
         console.log("⚙️ Socket siap digunakan");
@@ -121,29 +115,83 @@ const Home: React.FC = () => {
 
       socketRef.current = s;
 
+      let pendingSpeech = "";
       s.on("response_token", (data) => {
-        console.log("📥 Dapat response:", data);
-        Tts.stop()
-        Tts.speak(data.token)
-        setLastText((prev) => prev + data.token);
+        if (data.token) {
+          pendingSpeech += data.token;
+          setLastText((prev) => prev + data.token);
+        }
       });
 
-      s.on("error", (data) => {
-        console.log("💥 Error dari server:", data.error);
-        setLastText((prev) => prev + data.error);
-      });
+      //s.on("ack_location", (data) => {
+        //console.log("📍 Lokasi berhasil diperbarui:", data);
+      //});
 
-      s.on("end", () => {
-        console.log("Sesi selesai");
+      //s.on("error", (data) => {
+        //console.log("💥 Error dari server:", data.error);
+        //setLastText((prev) => prev + data.error);
+      //});
+
+      s.on("end", async () => {
+        console.log("🗣️ Semua token diterima, mulai TTS sekali saja");
+        await Tts.stop();
+        await speak(pendingSpeech);
+        pendingSpeech = "";
         setWaitingResponse(false);
       });
+
+      // mulai interval setelah socket siap
+      interval = setInterval(async () => {
+        try {
+          if (!s || !s.connected) return;
+
+          const coords = await getCurrentLocation();
+          const token = await AsyncStorage.getItem('access_token');
+
+          if (
+            coords?.latitude &&
+            coords?.longitude &&
+            (!lastLocation ||
+              Math.abs(coords.latitude - lastLocation.latitude) > 0.0001 ||
+              Math.abs(coords.longitude - lastLocation.longitude) > 0.0001)
+          ) {
+            s.emit("update_location", {
+              access_token: token,
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+            });
+            console.log("📤 Update lokasi:", coords.latitude, coords.longitude);
+            setLastLocation(coords);
+          }
+        } catch (err) {
+          console.warn("⚠️ Gagal update lokasi:", err);
+        }
+      }, 10000);
     };
 
     setupSocket();
 
     return () => {
+      clearInterval(interval);
       socketRef.current?.disconnect();
     };
+  }, []);
+
+  // 🎧 Sinkronkan mic dengan status TTS
+  useEffect(() => {
+    const sub = ttsState.addListener('change', (busy) => {
+      if (busy) {
+        console.log('🔇 [Home] TTS mulai bicara → matikan mic');
+        setMicOn(false);
+      } else {
+        console.log('🎙️ [Home] TTS selesai bicara → nyalakan mic kembali setelah delay');
+        setTimeout(() => {
+          setMicOn(true);
+        }, 1000); // buffer kecil, karena tts.tsx sudah kasih 3 detik
+      }
+    });
+
+    return () => sub.remove();
   }, []);
 
   // 🎤 Inisialisasi Kamera + Mic + TTS
@@ -158,10 +206,41 @@ const Home: React.FC = () => {
     init();
   }, [init]);
 
+  const handleLogout = async () => {
+    Alert.alert(
+      "Konfirmasi",
+      "Yakin ingin logout?",
+      [
+        { text: "Batal", style: "cancel" },
+        {
+          text: "Logout",
+          style: "destructive",
+          onPress: async () => {
+            await AsyncStorage.removeItem('access_token');
+            setShowMenu(false);
+            Alert.alert("Berhasil Logout", "Silakan login kembali.");
+            // Di sini nanti bisa arahkan ke halaman login jika pakai navigation
+          }
+        }
+      ]
+    );
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView>
         <Text style={styles.title}>Smart Assistant (Socket.IO Streaming)</Text>
+
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Smart Assistant (Socket.IO Streaming)</Text>
+          <Button title="☰" onPress={() => setShowMenu(!showMenu)} />
+        </View>
+
+        {showMenu && (
+          <View style={styles.menuBar}>
+            <Button title="Logout" color="#c0392b" onPress={handleLogout} />
+          </View>
+        )}
 
         <CameraStream ref={camRef} />
 
@@ -223,6 +302,12 @@ const Home: React.FC = () => {
           </View>
         )}
       </ScrollView>
+
+      <SpeechManager
+        active={micOn && permitted && socketReady && !waitingResponse}
+        onResult={onSpeechResult}
+      />
+
     </View>
   );
 };
@@ -239,4 +324,21 @@ const styles = StyleSheet.create({
   placeholder: { width: 240, height: 240, borderRadius: 8, backgroundColor: '#f2f2f2', alignItems: 'center', justifyContent: 'center' },
   responseBox: { marginTop: 16, padding: 12, backgroundColor: '#f7f7f7', borderRadius: 8 },
   responseLabel: { fontWeight: '700', marginBottom: 6 },
+
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  menuBar: {
+    backgroundColor: '#f4f4f4',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+
 });
