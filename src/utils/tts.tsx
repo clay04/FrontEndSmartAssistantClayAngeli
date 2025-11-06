@@ -1,20 +1,16 @@
 import Tts from 'react-native-tts';
 import { EventEmitter } from 'fbemitter';
-import { NativeEventEmitter } from 'react-native';
 
-const ttsNative = new NativeEventEmitter(Tts);
-export const ttsEvent = new EventEmitter();
-export const ttsState = new EventEmitter(); // tambahkan event global untuk mic control
+export const ttsEvent = new EventEmitter();   // buat komunikasi STT
+export const ttsState = new EventEmitter();   // buat kontrol mic di Home
 
 let inited = false;
 export let ttsBusy = false;
 
-function setTTSBusy(state) {
+function setTTSBusy(state: boolean) {
   ttsBusy = state;
-  ttsState.emit('change', ttsBusy); // broadcast perubahan state
+  ttsState.emit('change', ttsBusy);
 }
-
-let listeners = [];
 
 export async function initTTS(preferredLang = 'id-ID') {
   if (inited) return;
@@ -35,45 +31,31 @@ export async function initTTS(preferredLang = 'id-ID') {
     await Tts.setDefaultRate(1.0, true);
     await Tts.setDefaultPitch(1.0);
 
-    listeners.forEach(l => l.remove());
-    listeners = [];
+    // ✅ Gunakan event bawaan react-native-tts
+    Tts.addEventListener('tts-start', () => {
+      if (ttsBusy) return;
+      console.log('🗣️ [TTS] Mulai bicara');
+      setTTSBusy(true);
+      ttsEvent.emit('tts-start');
+    });
 
-    listeners.push(
-      ttsNative.addListener('tts-start', () => {
-        if (ttsBusy) return;
-        setTTSBusy(true);
-        console.log('🗣️ [TTS] Mulai bicara');
-        ttsEvent.emit('tts-start');
-      })
-    );
+    Tts.addEventListener('tts-finish', () => {
+      if (!ttsBusy) return;
+      console.log('✅ [TTS] Selesai bicara');
+      setTTSBusy(false);
+      ttsEvent.emit('tts-end');
+    });
 
-    listeners.push(
-      ttsNative.addListener('tts-finish', () => {
-        if (!ttsBusy) return;
-        console.log('🗣️ [TTS] Selesai bicara');
-        setTimeout(() => {
-          setTTSBusy(false);
-          console.log('🕓 [TTS] Diam total → kirim tts-end');
-          ttsEvent.emit('tts-end');
-        }, 3000); // jeda agar suara benar-benar selesai
-      })
-    );
-
-    listeners.push(
-      ttsNative.addListener('tts-cancel', () => {
-        if (!ttsBusy) return;
-        console.log('🗣️ [TTS] Dibatalkan');
-        setTimeout(() => {
-          setTTSBusy(false);
-          console.log('🕓 [TTS] Delay selesai, kirim tts-end');
-          ttsEvent.emit('tts-end');
-        }, 3000);
-      })
-    );
+    Tts.addEventListener('tts-cancel', () => {
+      if (!ttsBusy) return;
+      console.log('🚫 [TTS] Dibatalkan');
+      setTTSBusy(false);
+      ttsEvent.emit('tts-end');
+    });
 
     inited = true;
   } catch (e) {
-    console.warn('TTS init failed', e);
+    console.warn('⚠️ Gagal inisialisasi TTS:', e);
   }
 }
 
@@ -82,11 +64,11 @@ export async function speak(text: string) {
   try {
     if (ttsBusy) {
       await Tts.stop();
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise(r => setTimeout(r, 200));
     }
-    console.log('🎤 Memulai speak():', text);
-    Tts.speak(text);
+    console.log('🎤 [TTS] Bicara:', text);
+    await Tts.speak(text);
   } catch (e) {
-    console.warn('⚠️ Gagal mulai TTS:', e);
+    console.warn('⚠️ Gagal speak:', e);
   }
 }

@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Button, Image, StyleSheet, Text, View, ScrollView } from 'react-native';
+import { ActivityIndicator, Alert, Button, Image, StyleSheet, Text, View, ScrollView, TouchableOpacity } from 'react-native';
 import CameraStream, { CameraStreamHandle } from '../../components/CameraStream';
 import { ensureAllPermissions } from '../../utils/permission';
-import { initTTS, speak } from '../../utils/tts';
+import { initTTS, speak, ttsBusy } from '../../utils/tts';
 import { getCurrentLocation } from '../../utils/Location';
 import { ttsState } from '../../utils/tts';
 import { initSocket, getSocket } from '../../socket';
+
+import Ionicons from 'react-native-vector-icons/Ionicons';
 
 import RNFS from 'react-native-fs';
 import ImageResizer from 'react-native-image-resizer';
@@ -13,19 +15,13 @@ import ImageResizer from 'react-native-image-resizer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSpeechToText } from '../../hog/useSpeechToText';
 import Tts from 'react-native-tts';
+import { Gap, RadialGradientBackground } from '../../components';
 
 // 🔧 Helper: file → base64
 async function fileToBase64(uri: string): Promise<string> {
   const path = uri.replace('file://', '');
   return RNFS.readFile(path, 'base64');
 }
-
-// 🎙️ Komponen terpisah agar STT tidak restart tiap re-render
-const SpeechManager = React.memo(({ active, onResult }: { active: boolean; onResult: (text: string) => void }) => {
-  useSpeechToText({ active, onResult });
-  return null;
-});
-
 
 // 🔧 Helper: kompres foto biar nggak kegedean
 async function compressImage(uri: string): Promise<string> {
@@ -54,6 +50,8 @@ const Home: React.FC = () => {
   const socketRef = useRef<any>(null);
 
   const [showMenu, setShowMenu] = useState(false);
+  const [greeting, setGreeting] = useState('');
+
 
   // 🎤 Kirim audio + foto ke backend via Socket.IO
   const onSpeechResult = useCallback(async (speechText: string) => {
@@ -103,6 +101,11 @@ const Home: React.FC = () => {
     }
   }, [lastLocation]);
 
+  useSpeechToText({
+    active: micOn && permitted && socketReady && !waitingResponse,
+    onResult: onSpeechResult,
+  });
+
   // 📡 Init Socket.IO client
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -115,12 +118,12 @@ const Home: React.FC = () => {
 
       socketRef.current = s;
 
-      let pendingSpeech = "";
+      //let pendingSpeech = "";
       s.on("response_token", (data) => {
-        if (data.token) {
-          pendingSpeech += data.token;
-          setLastText((prev) => prev + data.token);
-        }
+        console.log("📥 Dapat response:", data);
+        Tts.stop()
+        Tts.speak(data.token)
+        setLastText((prev) => prev + data.token);
       });
 
       //s.on("ack_location", (data) => {
@@ -129,14 +132,13 @@ const Home: React.FC = () => {
 
       //s.on("error", (data) => {
         //console.log("💥 Error dari server:", data.error);
+        //Tts.stop()
+        //Tts.speak(data.error)
         //setLastText((prev) => prev + data.error);
       //});
 
-      s.on("end", async () => {
-        console.log("🗣️ Semua token diterima, mulai TTS sekali saja");
-        await Tts.stop();
-        await speak(pendingSpeech);
-        pendingSpeech = "";
+      s.on("end", () => {
+        console.log("Sesi selesai");
         setWaitingResponse(false);
       });
 
@@ -180,9 +182,11 @@ const Home: React.FC = () => {
   // 🎧 Sinkronkan mic dengan status TTS
   useEffect(() => {
     const sub = ttsState.addListener('change', (busy) => {
+      console.log("Busy", busy)
       if (busy) {
         console.log('🔇 [Home] TTS mulai bicara → matikan mic');
         setMicOn(false);
+        
       } else {
         console.log('🎙️ [Home] TTS selesai bicara → nyalakan mic kembali setelah delay');
         setTimeout(() => {
@@ -226,14 +230,37 @@ const Home: React.FC = () => {
     );
   };
 
-  return (
-    <View style={styles.container}>
-      <ScrollView>
-        <Text style={styles.title}>Smart Assistant (Socket.IO Streaming)</Text>
+  useEffect(() => {
+    const updateGreeting = () => {
+      const hour = new Date().getHours();
+      if (hour >= 5 && hour < 12) setGreeting('Selamat Pagi');
+      else if (hour >= 12 && hour < 17) setGreeting('Selamat Siang');
+      else if (hour >= 17 && hour < 20) setGreeting('Selamat Sore');
+      else setGreeting('Selamat Malam');
+    };
 
+    updateGreeting();
+    const interval = setInterval(updateGreeting, 60 * 1000); // update tiap menit
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <RadialGradientBackground>
+      <Gap height={15}/>
+      <ScrollView>
         <View style={styles.headerRow}>
-          <Text style={styles.title}>Smart Assistant (Socket.IO Streaming)</Text>
-          <Button title="☰" onPress={() => setShowMenu(!showMenu)} />
+          <View>
+            <Text style={styles.title}>{greeting}</Text>
+            <Text style={styles.user}>Pengguna</Text>
+          </View>
+          <TouchableOpacity onPress={() => setShowMenu(!showMenu)} >
+            <Ionicons 
+              name={'menu'}
+              size={30}
+              color={'#fff'}
+            />
+          </TouchableOpacity>
         </View>
 
         {showMenu && (
@@ -243,28 +270,6 @@ const Home: React.FC = () => {
         )}
 
         <CameraStream ref={camRef} />
-
-        <View style={styles.row}>
-          <Text style={[styles.badge, { backgroundColor: micOn ? '#dff7df' : '#ffecec' }]}>
-            Mic: {micOn ? 'ON (streaming)' : 'OFF'}
-          </Text>
-        </View>
-
-        <View style={styles.row}>
-          <Button title={micOn ? 'Matikan Mic' : 'Nyalakan Mic'} onPress={() => setMicOn(v => !v)} />
-          <View style={{ width: 12 }} />
-          <Button
-            title="Ambil Foto Sekarang"
-            onPress={async () => {
-              if (!camRef.current?.isReady()) {
-                Alert.alert('Kamera belum siap', 'Tunggu kamera aktif dulu.');
-                return;
-              }
-              const snap = await camRef.current.takeSnapshot();
-              setLastPhoto(snap ?? null);
-            }}
-          />
-        </View>
 
         {sending && (
           <View style={styles.row}>
@@ -280,35 +285,25 @@ const Home: React.FC = () => {
           </View>
         )}
 
-        <View style={styles.previewRow}>
-          {lastPhoto ? (
-            <Image source={{ uri: lastPhoto }} style={styles.preview} />
-          ) : (
-            <View style={styles.placeholder}><Text>Belum ada snapshot</Text></View>
-          )}
+        <View style={styles.row}>
+          <TouchableOpacity
+            style={[
+              styles.micButton,
+              { backgroundColor: micOn ? '#ffffff13' : '#00000016' },
+            ]}
+            onPress={() => setMicOn(v => !v)}
+          >
+            <Ionicons
+              name={micOn ? 'mic' : 'mic-off'}
+              size={55}
+              color={micOn ? '#0f5132' : '#a33'}
+            />
+          </TouchableOpacity>
         </View>
 
-        {!!lastText && (
-          <View style={styles.responseBox}>
-            <Text style={styles.responseLabel}>Respons (streaming):</Text>
-            <Text>{lastText}</Text>
-          </View>
-        )}
-
-        {lastLocation && (
-          <View style={styles.responseBox}>
-            <Text style={styles.responseLabel}>Lokasi Terakhir:</Text>
-            <Text>Lat: {lastLocation.latitude}, Lon: {lastLocation.longitude}</Text>
-          </View>
-        )}
       </ScrollView>
 
-      <SpeechManager
-        active={micOn && permitted && socketReady && !waitingResponse}
-        onResult={onSpeechResult}
-      />
-
-    </View>
+    </RadialGradientBackground>
   );
 };
 
@@ -316,8 +311,9 @@ export default Home;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff', padding: 16 },
-  title: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
+  title: { fontSize: 20, marginBottom: 5, color:'#ffffff', fontFamily: 'Onest-Bold' },
+  user: { fontSize: 18, marginBottom: 12, color:'#ffffff', fontFamily: 'Onest-Medium' },
+  row: { flexDirection: 'row', alignItems: 'center', marginTop: 30, justifyContent:'center' },
   badge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: '#eee', fontSize: 12 },
   previewRow: { marginTop: 14, alignItems: 'center' },
   preview: { width: 240, height: 240, borderRadius: 8, resizeMode: 'cover' },
@@ -333,12 +329,25 @@ const styles = StyleSheet.create({
   },
 
   menuBar: {
-    backgroundColor: '#f4f4f4',
+    backgroundColor: '#f4f4f417',
     borderRadius: 8,
     padding: 10,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#dddddd3e',
+  },
+
+  micButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
   },
 
 });

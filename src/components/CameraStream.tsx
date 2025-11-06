@@ -85,8 +85,9 @@ export default CameraStream;
 const styles = StyleSheet.create({
   root: {
     width: '100%',
+    height: '75%',
     aspectRatio: 3 / 4,
-    backgroundColor: '#000',
+    backgroundColor: '#1c1b1bff',
     borderRadius: 12,
     overflow: 'hidden',
   },

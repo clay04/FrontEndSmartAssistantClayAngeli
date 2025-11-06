@@ -27,7 +27,12 @@ export function useSpeechToText({ active = true, onResult }) {
       if (recognizingRef.current) {
         console.log("🔇 pause, TTS aktif");
         pauseByTTS.current = true;
-        await Voice.stop();
+        try {
+          await Voice.stop()
+          await Voice.destroy()
+        } catch(err) {
+          console.log('Gagal Stop STT', err)
+        }
         recognizingRef.current = false;
         setIsRecognizing(false);
       }
@@ -36,13 +41,14 @@ export function useSpeechToText({ active = true, onResult }) {
     const resumeSTT = async () => {
       if (pauseByTTS.current && active) {
         console.log("🔊 TTS selesai, tahan dulu sebelum STT");
-        pauseByTTS.current = false;
+        pauseByTTS.current = true;
 
         // Tahan minimal 3 detik setelah tts-end baru boleh hidup lagi
         await new Promise(r => setTimeout(r, 3500));
 
         if (ttsBusy) {
           console.log("⏸️ Masih ttsBusy, STT skip sementara");
+          await stopSTT();
           return;
         }
 
@@ -69,6 +75,12 @@ export function useSpeechToText({ active = true, onResult }) {
       console.log("🎤 Sesi STT berakhir");
       recognizingRef.current = false;
       setIsRecognizing(false);
+
+      if (active && !ttsBusy) {
+        console.log("🔁 Restart STT otomatis setelah sesi selesai");
+        await new Promise(r => setTimeout(r, 2000));
+        start();
+      }
     };
 
     Voice.onSpeechResults = (event) => {
@@ -79,11 +91,11 @@ export function useSpeechToText({ active = true, onResult }) {
     };
 
     Voice.onSpeechPartialResults = (event) => {
-      if (event.value?.length) console.log("💬 Partial:", event.value[0]);
+      if  (event.value?.length) console.log("💬 Request:", event.value[0]);
     };
 
     Voice.onSpeechError = (err) => {
-      console.error("❌ Speech error:", err);
+      console.error("❌ Speech error:", JSON.stringify(err, null, 2));
       recognizingRef.current = false;
       setIsRecognizing(false);
       setError(err);
@@ -92,9 +104,10 @@ export function useSpeechToText({ active = true, onResult }) {
       setTimeout(() => {
         if (active && !ttsBusy) {
           console.log("🔁 Restart STT setelah error aman");
-          start();
+          setIsRecognizing(true);
+          start()
         }
-      }, 3000);
+      }, 1000);
     };
 
     // 🧹 Cleanup hanya saat unmount permanen
@@ -134,6 +147,7 @@ export function useSpeechToText({ active = true, onResult }) {
     try {
       if (ttsBusy) {
         console.log("⏳ Tidak bisa mulai STT karena TTS masih bicara");
+        stop();
         return;
       }
 
@@ -146,8 +160,8 @@ export function useSpeechToText({ active = true, onResult }) {
       recognizingRef.current = true;
       setIsRecognizing(true);
 
-      await Voice.stop(); // pastikan session lama ditutup
-      await new Promise((r) => setTimeout(r, 1000)); // kasih jeda lebih panjang sebelum start
+      await Voice.destroy(); // pastikan session lama ditutup
+      await new Promise((r) => setTimeout(r, 1500)); // kasih jeda lebih panjang sebelum start
 
       await Voice.start("id-ID");
       console.log("✅ Voice.start() sukses");
