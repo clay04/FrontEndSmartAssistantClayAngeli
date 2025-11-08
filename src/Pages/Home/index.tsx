@@ -34,7 +34,7 @@ async function compressImage(uri: string): Promise<string> {
   }
 }
 
-const Home: React.FC = () => {
+const Home: React.FC = ({navigation}: {navigation: any}) => {
   const camRef = useRef<CameraStreamHandle>(null);
   const socket = useRef<any>(null);
 
@@ -223,7 +223,7 @@ const Home: React.FC = () => {
             await AsyncStorage.removeItem('access_token');
             setShowMenu(false);
             Alert.alert("Berhasil Logout", "Silakan login kembali.");
-            // Di sini nanti bisa arahkan ke halaman login jika pakai navigation
+            navigation.navigate('UsernameLogin')
           }
         }
       ]
