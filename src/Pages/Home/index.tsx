@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Button, Image, StyleSheet, Text, View, ScrollView, TouchableOpacity } from 'react-native';
 import CameraStream, { CameraStreamHandle } from '../../components/CameraStream';
 import { ensureAllPermissions } from '../../utils/permission';
-import { initTTS, speak, ttsBusy } from '../../utils/tts';
+import { initTTS, speak} from '../../utils/tts';
+
 import { getCurrentLocation } from '../../utils/Location';
 import { ttsState } from '../../utils/tts';
 import { initSocket, getSocket } from '../../socket';
@@ -44,6 +45,7 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
   const [lastPhoto, setLastPhoto] = useState<string | null>(null);
   const [lastText, setLastText] = useState<string>('');
   const [micOn, setMicOn] = useState<boolean>(true);
+  const [manualMicOff, setManualMicOff] = useState(false);
   const [lastLocation, setLastLocation] = useState<{ latitude: number; longitude: number } | null>(null);
 
   const [socketReady, setSocketReady] = useState(false);
@@ -52,6 +54,7 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
   const [showMenu, setShowMenu] = useState(false);
   const [greeting, setGreeting] = useState('');
 
+  const endStreamTimer = useRef<NodeJS.Timeout | null>(null);
 
   // 🎤 Kirim audio + foto ke backend via Socket.IO
   const onSpeechResult = useCallback(async (speechText: string) => {
@@ -121,9 +124,17 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
       //let pendingSpeech = "";
       s.on("response_token", (data) => {
         console.log("📥 Dapat response:", data);
+
+        if (endStreamTimer.current) { clearTimeout(endStreamTimer.current); }
+
         Tts.stop()
-        Tts.speak(data.token)
+        speak(data.token)
         setLastText((prev) => prev + data.token);
+
+        endStreamTimer.current = setTimeout(() => {
+          console.log("⏰ Stream END timeout! Memaksa sesi selesai.");
+          setWaitingResponse(false);
+        }, 3000); // 3 detik
       });
 
       //s.on("ack_location", (data) => {
@@ -138,6 +149,9 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
       //});
 
       s.on("end", () => {
+
+        if (endStreamTimer.current) { clearTimeout(endStreamTimer.current); }
+
         console.log("Sesi selesai");
         setWaitingResponse(false);
       });
@@ -168,7 +182,7 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
         } catch (err) {
           console.warn("⚠️ Gagal update lokasi:", err);
         }
-      }, 10000);
+      }, 20000);
     };
 
     setupSocket();
@@ -177,25 +191,6 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
       clearInterval(interval);
       socketRef.current?.disconnect();
     };
-  }, []);
-
-  // 🎧 Sinkronkan mic dengan status TTS
-  useEffect(() => {
-    const sub = ttsState.addListener('change', (busy) => {
-      console.log("Busy", busy)
-      if (busy) {
-        console.log('🔇 [Home] TTS mulai bicara → matikan mic');
-        setMicOn(false);
-        
-      } else {
-        console.log('🎙️ [Home] TTS selesai bicara → nyalakan mic kembali setelah delay');
-        setTimeout(() => {
-          setMicOn(true);
-        }, 1000); // buffer kecil, karena tts.tsx sudah kasih 3 detik
-      }
-    });
-
-    return () => sub.remove();
   }, []);
 
   // 🎤 Inisialisasi Kamera + Mic + TTS
@@ -245,6 +240,28 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const sub = ttsState.addListener('change', (busy) => {
+      console.log("Busy", busy);
+      if (busy) {
+        setTimeout(() => setMicOn(false), 100);
+        console.log('🔇 [Home] TTS mulai bicara → matikan mic');
+        if (micOn) setMicOn(false);
+      } else {
+        console.log('🎙️ [Home] TTS selesai bicara → nyalakan mic kembali setelah delay');
+        setTimeout(() => {
+          if (!manualMicOff) { // hanya nyalakan lagi kalau user tidak matikan manual
+            setMicOn(true);
+          } else {
+            console.log('🙅‍♀️ Mic tetap off karena dimatikan manual');
+          }
+        }, 2500);
+      }
+    });
+
+    return () => sub.remove();
+  }, [micOn, manualMicOff]);
+
   return (
     <RadialGradientBackground>
       <Gap height={15}/>
@@ -291,7 +308,12 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
               styles.micButton,
               { backgroundColor: micOn ? '#ffffff13' : '#00000016' },
             ]}
-            onPress={() => setMicOn(v => !v)}
+            onPress={() => setMicOn(v => {
+                const newState = !v;
+                setManualMicOff(!newState);
+                return newState;
+              }
+            )}
           >
             <Ionicons
               name={micOn ? 'mic' : 'mic-off'}
