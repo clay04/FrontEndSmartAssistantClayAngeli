@@ -56,6 +56,29 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
 
   const endStreamTimer = useRef<NodeJS.Timeout | null>(null);
 
+  useEffect(() => {
+    const greetUser = async () => {
+      try {
+        const name = await AsyncStorage.getItem('username');
+        console.log("Nama User: ", name)
+        if (!name) return;
+
+        const message = `${greeting}, ${name}. Saya siap membantu Anda hari ini.`;
+
+        setMicOn(false);
+
+        await speak(message);
+
+        setTimeout(() => {
+          setMicOn(true);
+        }, 1500)
+      } catch (err) {
+        console.warn('Gagal menyapa user:', err);
+      }
+    }
+    setTimeout(greetUser, 500);
+  }, [greeting]);
+
   // 🎤 Kirim audio + foto ke backend via Socket.IO
   const onSpeechResult = useCallback(async (speechText: string) => {
     console.log('🗣️ Hasil STT:', speechText);
@@ -218,7 +241,10 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
             await AsyncStorage.removeItem('access_token');
             setShowMenu(false);
             Alert.alert("Berhasil Logout", "Silakan login kembali.");
-            navigation.navigate('UsernameLogin')
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'Splash' }]
+            });
           }
         }
       ]

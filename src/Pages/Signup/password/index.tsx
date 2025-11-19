@@ -21,6 +21,8 @@ const PasswordSignUp = ({navigation}) => {
 
       await AsyncStorage.setItem("access_token", token);
       await AsyncStorage.setItem("refresh_token", refresh_token);
+      await AsyncStorage.setItem("username", data.username);
+
 
       Alert.alert('Success', 'Registration successful')
       

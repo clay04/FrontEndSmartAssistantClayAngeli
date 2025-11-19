@@ -7,8 +7,8 @@ export const ttsEvent = new EventEmitter();
 export const ttsState = new EventEmitter();
 
 let inited = false;
-export let ttsBusy = false; // 👈 Ekspor ini
-export let ttsCooldown = false; // 👈 Tambahkan ini
+export let ttsBusy = false;
+export let ttsCooldown = false; 
 
 // Buat fungsi untuk mengontrol state
 function setTTSBusy(state: boolean) {
@@ -24,7 +24,6 @@ function setTTSBusy(state: boolean) {
     }, 2500); // 1.5 detik
   }
 }
-
 
 export async function initTTS(preferredLang = 'id-ID') {
   if (inited) return;

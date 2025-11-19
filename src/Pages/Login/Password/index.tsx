@@ -21,6 +21,7 @@ const PasswordLogin = ({navigation}: {navigation: any}) => {
 
             await AsyncStorage.setItem("access_token", token);
             await AsyncStorage.setItem("refresh_token", refresh_token);
+            await AsyncStorage.setItem("username", payload.username);
 
             Alert.alert('Success', 'Login successful')
 

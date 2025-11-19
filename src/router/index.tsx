@@ -10,12 +10,20 @@ import {
     UsernameLogin, 
     UsernameSignUp
  } from "../Pages";
+import AuthLoading from "../components/molecules/AuthLoading";
 
 const Stack = createNativeStackNavigator();
 
 const Router = () => {
     return (
-        <Stack.Navigator>
+        <Stack.Navigator
+            screenOptions={{headerShown: false}}
+            initialRouteName="AuthLoading"
+        >
+            <Stack.Screen 
+                name="AuthLoading"
+                component={AuthLoading}
+            />
 
             <Stack.Screen 
                 name="Splash"
