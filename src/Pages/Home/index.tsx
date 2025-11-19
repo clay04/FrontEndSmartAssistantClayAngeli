@@ -58,6 +58,7 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
 
   useEffect(() => {
     const greetUser = async () => {
+
       try {
         const name = await AsyncStorage.getItem('username');
         console.log("Nama User: ", name)
@@ -130,6 +131,7 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
   useSpeechToText({
     active: micOn && permitted && socketReady && !waitingResponse,
     onResult: onSpeechResult,
+    waiting: waitingResponse,
   });
 
   // 📡 Init Socket.IO client
@@ -281,7 +283,7 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
           } else {
             console.log('🙅‍♀️ Mic tetap off karena dimatikan manual');
           }
-        }, 2500);
+        }, 600);
       }
     });
 

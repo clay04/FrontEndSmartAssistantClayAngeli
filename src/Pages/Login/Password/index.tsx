@@ -23,7 +23,7 @@ const PasswordLogin = ({navigation}: {navigation: any}) => {
             await AsyncStorage.setItem("refresh_token", refresh_token);
             await AsyncStorage.setItem("username", payload.username);
 
-            Alert.alert('Success', 'Login successful')
+            //Alert.alert('Success', 'Login successful')
 
             navigation.reset({index: 0, routes: [{name: 'Home'}]});
         } catch (err: any) {

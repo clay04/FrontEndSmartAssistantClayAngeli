@@ -24,7 +24,7 @@ const PasswordSignUp = ({navigation}) => {
       await AsyncStorage.setItem("username", data.username);
 
 
-      Alert.alert('Success', 'Registration successful')
+      //Alert.alert('Success', 'Registration successful')
       
       navigation.reset({index: 0, routes: [{name: 'Home'}]});
 

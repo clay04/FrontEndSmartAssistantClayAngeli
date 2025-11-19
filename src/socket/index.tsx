@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import io from "socket.io-client";
 
-const SOCKET_URL = "https://unashamedly-evangelistic-leatha.ngrok-free.dev/"; // Pastikan IP laptop kamu
+const SOCKET_URL = "http://10.209.182.131:5000/"; // Pastikan IP laptop kamu
 
 let socket = null;
 
