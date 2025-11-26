@@ -54,7 +54,17 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
   const [showMenu, setShowMenu] = useState(false);
   const [greeting, setGreeting] = useState('');
 
+  const [username, setUsername] = useState<string | null>(null);
+
   const endStreamTimer = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    const fetchUsername = async () => {
+      const name = await AsyncStorage.getItem('username');
+      setUsername(name);
+    }
+    fetchUsername();
+  }, []);
 
   useEffect(() => {
     const greetUser = async () => {
@@ -297,7 +307,7 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
         <View style={styles.headerRow}>
           <View>
             <Text style={styles.title}>{greeting}</Text>
-            <Text style={styles.user}>Pengguna</Text>
+            <Text style={styles.user}>{username}</Text>
           </View>
           <TouchableOpacity onPress={() => setShowMenu(!showMenu)} >
             <Ionicons 
