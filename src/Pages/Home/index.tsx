@@ -61,7 +61,7 @@ const Home: React.FC = ({navigation}: {navigation: any}) => {
   useEffect(() => {
     const fetchUsername = async () => {
       const name = await AsyncStorage.getItem('username');
-      setUsername(name);
+      setUsername(name || 'Pengguna');
     }
     fetchUsername();
   }, []);
